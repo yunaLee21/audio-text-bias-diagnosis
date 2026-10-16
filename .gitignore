@@ -1,0 +1,6 @@
+Paper/
+report/
+
+# local environment / caches
+.venv/
+__pycache__/

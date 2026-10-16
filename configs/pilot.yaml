@@ -1,0 +1,47 @@
+# Pilot run configuration (report/Task.md). CLI flags override these values.
+
+seed: 42
+
+model:
+  name: qwen2-audio-7b-instruct
+  hf_id: Qwen/Qwen2-Audio-7B-Instruct
+  # 7B weights in fp16 are ~16 GB: Kaggle "GPU T4 x2" (2x15 GB) runs fp16 split across both GPUs;
+  # a single 16 GB GPU (P100, one T4) needs 4bit. T4/P100 have no bf16 -> use float16.
+  dtype: float16            # float16 | bfloat16 | float32
+  quantization: none        # none | 4bit | 8bit  (4bit/8bit need bitsandbytes)
+
+data:
+  facts: data/fictitious_facts/facts.json
+  positive_control: data/positive_control/facts.json
+  stimuli_dir: data/generated
+  audio_dir: data/audio
+
+tts:
+  engine: edge-tts          # edge-tts | gtts
+  voice: en-US-AriaNeural   # edge-tts voice; ignored by gtts
+  lang: en                  # gtts language
+
+prompt:
+  # paper2: Paper 2's strict-JSON system prompt (no hint about which modality to trust).
+  # mcr:    paper2 format + MCR-BENCH's "may be accurate, inaccurate, or irrelevant" disclaimer.
+  variant: paper2
+  # Order of the two inputs in the user turn. Paper 2 shows this order changes the bias.
+  order: text_first         # text_first | audio_first
+
+eval:
+  conditions:
+    - audio_only
+    - audio_only_flip
+    - text_only
+    - text_only_flip
+    - faithful
+    - conflict_audio_correct
+    - conflict_text_correct
+    - irrelevant
+  # logit: one forward pass, read P(A) vs P(B) at the first answer token (preferred).
+  # self_consistency: sample n times, confidence = share of the majority letter (fallback).
+  uq: logit
+  n_samples: 10
+  temperature: 1.0
+  # Also run one greedy generation per stimulus to check the logit readout matches the real output.
+  greedy_check: true
