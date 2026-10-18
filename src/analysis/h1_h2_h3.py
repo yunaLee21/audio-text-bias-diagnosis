@@ -10,12 +10,14 @@ Group level (H3): audio_only / text_only accuracy vs chance (binomial test), inp
 and the share of answers that are "A" (position bias).
 
     python -m src.analysis.h1_h2_h3 --results results/pilot_run_1
+    python -m src.analysis.h1_h2_h3 --results results/complexity_run_1 --kind complexity_L3
 """
 
 import argparse
 from collections import Counter, defaultdict
 
 from src.common import read_jsonl, resolve, write_json
+from src.eval.metrics import collapse_orders
 
 
 def bucket(fact_rows, tau):
@@ -53,8 +55,9 @@ def tracking(by_fact, base, flip):
     return sum(b["correct"] and fl["correct"] for b, fl in pairs) / len(pairs)
 
 
-def analyze(rows, tau):
-    rows = [r for r in rows if r["kind"] == "fictitious"]
+def analyze(raw_rows, tau, kind="fictitious"):
+    raw_rows = [r for r in raw_rows if r["kind"] == kind]
+    rows = collapse_orders(raw_rows)  # one scored row per item, A/B orders averaged
     by_fact = defaultdict(dict)
     for r in rows:
         by_fact[r["fact_id"]][r["condition"]] = r
@@ -68,12 +71,12 @@ def analyze(rows, tau):
             group[cond] = {"n": len(rs), "accuracy": k / len(rs), "p_vs_chance": binom_p(k, len(rs))}
     group["audio_tracking_rate"] = tracking(by_fact, "audio_only", "audio_only_flip")
     group["text_tracking_rate"] = tracking(by_fact, "text_only", "text_only_flip")
-    group["share_answer_A"] = sum(r["chosen_letter"] == "A" for r in rows) / len(rows) if rows else None
-    return {"tau": tau, "counts": dict(Counter(b for b in buckets.values() if b)), "group": group,
+    group["share_answer_A"] = sum(r["chosen_letter"] == "A" for r in raw_rows) / len(raw_rows) if raw_rows else None
+    return {"kind": kind, "tau": tau, "counts": dict(Counter(b for b in buckets.values() if b)), "group": group,
             "per_fact": buckets}
 
 
-def plot(rows, path):
+def plot(raw_rows, path, kind="fictitious"):
     """audio-only confidence vs P(audio value) under conflict, one dot per fact."""
     try:
         import matplotlib
@@ -82,9 +85,8 @@ def plot(rows, path):
     except ImportError:
         return False
     by_fact = defaultdict(dict)
-    for r in rows:
-        if r["kind"] == "fictitious":
-            by_fact[r["fact_id"]][r["condition"]] = r
+    for r in collapse_orders([r for r in raw_rows if r["kind"] == kind]):
+        by_fact[r["fact_id"]][r["condition"]] = r
     pts = [(f["audio_only"]["p_expected"], f["conflict_audio_correct"]["p_expected"])
            for f in by_fact.values() if "audio_only" in f and "conflict_audio_correct" in f]
     if not pts:
@@ -94,7 +96,7 @@ def plot(rows, path):
     ax.axhline(0.5, color="grey", lw=0.8, ls="--")
     ax.axvline(0.5, color="grey", lw=0.8, ls="--")
     ax.set(xlim=(0, 1), ylim=(0, 1), xlabel="audio-only P(planted)",
-           ylabel="conflict P(audio value)", title="Audio confidence vs. conflict outcome")
+           ylabel="conflict P(audio value)", title=f"Audio confidence vs. conflict ({kind})")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     return True
@@ -104,14 +106,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results", required=True)
     ap.add_argument("--tau", type=float, default=0.8, help="confidence threshold for 'confident'")
+    ap.add_argument("--kind", default="fictitious", help="dataset kind, e.g. fictitious or complexity_L2")
     args = ap.parse_args()
 
     run = resolve(args.results)
     rows = read_jsonl(run / "predictions.jsonl")
-    res = analyze(rows, args.tau)
-    write_json(res, run / "h_buckets.json")
-    if plot(rows, run / "audio_conf_vs_conflict.png"):
-        print(f"figure: {run / 'audio_conf_vs_conflict.png'}")
+    res = analyze(rows, args.tau, args.kind)
+    write_json(res, run / f"h_buckets_{args.kind}.json")
+    fig = run / f"audio_conf_vs_conflict_{args.kind}.png"
+    if plot(rows, fig, args.kind):
+        print(f"figure: {fig}")
     print(f"bucket counts (tau={args.tau}): {res['counts']}")
     for k, v in res["group"].items():
         print(f"  {k}: {v}")

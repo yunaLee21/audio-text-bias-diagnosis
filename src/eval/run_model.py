@@ -2,6 +2,7 @@
 
     python -m src.eval.run_model --out results/pilot_run_1
     python -m src.eval.run_model --out results/smoke --limit 4 --conditions conflict_audio_correct
+    python -m src.eval.run_model --stimuli data/complexity/stimuli.jsonl --out results/complexity_run_1
 
 Predictions are appended one row at a time and already-finished stim_ids are skipped, so a
 Colab/Kaggle session that dies mid-run can simply be restarted with the same command.
@@ -61,7 +62,7 @@ def main():
     ap.add_argument("--stimuli", default="data/generated/stimuli.jsonl")
     ap.add_argument("--out", default="results/pilot_run_1")
     ap.add_argument("--conditions", nargs="+", help="subset of conditions (default: config)")
-    ap.add_argument("--kinds", nargs="+", default=["fictitious", "real"])
+    ap.add_argument("--kinds", nargs="+", help="only these dataset kinds (default: all in the file)")
     ap.add_argument("--limit", type=int, help="only the first N facts (smoke tests)")
     ap.add_argument("--uq", choices=["logit", "self_consistency"])
     ap.add_argument("--mock", action="store_true", help="random answers, no model (pipeline test)")
@@ -73,10 +74,10 @@ def main():
         cfg["eval"]["uq"] = args.uq
     conditions = set(args.conditions or cfg["eval"]["conditions"])
 
-    stimuli = [s for s in read_jsonl(args.stimuli) if s["condition"] in conditions and s["kind"] in args.kinds]
+    stimuli = [s for s in read_jsonl(args.stimuli) if s["condition"] in conditions and (not args.kinds or s["kind"] in args.kinds)]
     if args.limit:
         keep = []
-        for kind in args.kinds:
+        for kind in sorted({s["kind"] for s in stimuli}):
             ids = sorted({s["fact_id"] for s in stimuli if s["kind"] == kind})[: args.limit]
             keep += ids
         stimuli = [s for s in stimuli if s["fact_id"] in keep]

@@ -6,7 +6,7 @@ When an Audio-Language Model (Audio-LLM) receives audio together with text that 
 
 To remove both confounds by construction, the benchmark uses **fully fictitious facts**: invented creatures with invented attributes, read aloud with text-to-speech. It then uses each sample's **single-modality confidence** to tell genuine suppression apart from weak audio understanding and from answering out of memory.
 
-**Status:** the pilot pipeline is implemented (data generation → evaluation → analysis). The first step is a smoke test on Qwen2-Audio-7B-Instruct, followed by a 15-fact pilot.
+**Status:** the pilot pipeline is implemented (data generation → evaluation → analysis), and a smoke test on Qwen2-Audio-7B-Instruct confirmed that the logit readout is reliable. Next: the full pilot and the complexity dataset.
 
 ---
 
@@ -70,13 +70,31 @@ Novel audio concepts are by definition unfamiliar, so H1 and H2 predict the same
 
 - **Fictitious facts** (`data/fictitious_facts/facts.json`): an invented entity name (e.g. *Pemoux*) plus one of 12 binary attributes (activity, call pitch, fur color, habitat, diet, climate, social life, legs, size, breeding season, body covering, hearts).
   - Which value is "true" (the **planted** value) is randomized, balanced 50/50 across facts. A model that ignores the input therefore cannot score above chance, and that is what separates H2 from H3.
-- **Positive control** (`data/positive_control/facts.json`): 8 real, familiar facts (e.g. *"The capital of France is Paris."*) in the same schema. They check that the setup reproduces the known text bias before the results on fictitious data are trusted.
+- **Positive control** (`data/positive_control/facts.json`): 8 everyday statements whose answer world knowledge does not decide, in the style of *Who Wins the Conflict?* [3]. They cover its four swap types (adjective, negation, number, time), e.g. *"Closed / Open stations are shown in normal font."* Because the same model and prompt are used, the control checks that the setup reproduces that paper's known text bias before the results on fictitious data are trusted.
+  - Real-world facts (e.g. *"The capital of France is Paris"*) are deliberately avoided: there the model follows world knowledge, so they measure input-vs-memory rather than audio-vs-text.
 - **Audio:** one clip per fact per value (`<fact_id>_planted.mp3`, `<fact_id>_flipped.mp3`), synthesized with `edge-tts` (`gTTS` as fallback).
 - **Text variants:** adapted from MCR-BENCH's faithful / adversarial / irrelevant synthesis. Facts are invented rather than taken from real captions. The adversarial text flips the attribute, and the irrelevant text is a different fact from the same pool.
 
+### Complexity dataset
+
+A separate dataset (`data/complexity/`) presents 12 further fictitious facts (one per attribute) at four sentence-difficulty levels. Its purpose is to lower audio-side confidence in controlled steps. With simple sentences, audio-only confidence sits at the ceiling, which leaves H1 vs. H2 untestable.
+
+| Level | Change | Example |
+|---|---|---|
+| L0 | baseline | *The Planai has six legs.* |
+| L1 | extra information about the entity | *The Planai, which eats only fruit, has six legs and has a high-pitched call.* |
+| L2 | answer deep inside the sentence | *Researchers who spent several years observing animals in the remote valleys have reported that the Planai, which few people have ever seen, has six legs.* |
+| L3 | lure: both values appear | *Unlike its close relative the Plodedun, which has four legs, the Planai has six legs.* |
+
+- **Minimal pairs:** at every level, the planted and flipped sentences differ only in the tested value. At L3 the two values swap between the entity and its relative.
+- **Fixed per fact:** fillers, frames and lures are chosen once per fact, so a fact's levels differ only in structure.
+- **Predictions:** H2 predicts the text-follow rate rises as audio-only confidence falls across levels. H1 predicts it is already high at L0.
+- **Comparing levels:** a hard sentence is harder to hear than to read, so text-follow is compared with the audio-only and text-only baselines *of the same level*.
+- **Clip length:** clips are 3–11 s, well under the ~30 s that Qwen2-Audio’s Whisper-based audio encoder takes in one window.
+
 ### Conditions
 
-One stimulus per fact per condition:
+One item per fact per condition. The two conflict conditions are run in **both A/B orders**, and their probabilities are averaged per option value, so a preference for a letter position cancels out (`order-flip` reports how often the order alone changed the answer):
 
 | Condition | Audio says | Text says | Expected answer | Used for |
 |---|---|---|---|---|
@@ -91,7 +109,7 @@ One stimulus per fact per condition:
 
 ### Prompt and confidence readout
 
-- **Format:** forced choice between A and B, using the strict-JSON prompt from *Who Wins the Conflict?* [3]. The A/B position is randomized per stimulus.
+- **Format:** forced choice between A and B, using the strict-JSON prompt from *Who Wins the Conflict?* [3]. The A/B position is randomized per item, and conflict items are run in both orders.
 - **Logit readout (default):** the assistant turn is pre-filled with `{"answer":"`, so the next token is the answer letter. Its logits give P(A) and P(B). In Qwen2-Audio's tokenizer, `A` and `B` are single tokens.
 - **Sanity checks:** each prediction also records `mass_ab`, the share of full-vocabulary probability on A or B, and the model's free-form greedy answer. Together they show whether the logit readout matches what the model actually says.
 - **Self-consistency (fallback):** sample *n* free-form answers and use the share of the majority letter as the confidence.
@@ -104,6 +122,7 @@ One stimulus per fact per condition:
   - mean confidence
   - P(expected answer)
   - text-follow rate
+  - order-flip rate and share of "B" answers (position-bias diagnostics)
 - **Conflict:**
   - text-follow rate over both conflict directions (0.5 = balanced)
   - Δ(T−A) = text-side accuracy − audio-side accuracy
@@ -118,6 +137,7 @@ One stimulus per fact per condition:
   - input-tracking rate (answer flips when the stated value flips)
   - A/B position bias
   - a scatter plot of audio-only confidence vs. the conflict outcome
+- **Complexity sweep:** per level, audio-only / text-only confidence, input tracking and conflict text-follow; Spearman ρ between audio-only confidence and the conflict outcome across all (fact, level) items
 
 ---
 
@@ -129,25 +149,29 @@ One stimulus per fact per condition:
 │   └── pilot.yaml              # model, dtype/quantization, TTS, prompt variant, conditions, UQ method
 ├── data/
 │   ├── fictitious_facts/       # facts.json: invented facts (source of truth)
-│   ├── positive_control/       # facts.json: real, familiar facts
-│   ├── audio/                  # TTS clips
-│   └── generated/              # stimuli.jsonl: one row per fact x condition
+│   ├── positive_control/       # facts.json: knowledge-neutral control statements
+│   ├── audio/                  # TTS clips (main pilot)
+│   ├── generated/              # stimuli.jsonl: one row per fact x condition (x A/B order)
+│   └── complexity/             # facts.json, audio/, stimuli.jsonl: the complexity dataset
 ├── notebooks/
-│   └── kaggle_smoke_test.ipynb # GPU smoke test on Kaggle
+│   ├── kaggle_smoke_test.ipynb # GPU smoke test on Kaggle
+│   └── kaggle_pilot.ipynb      # full pilot + complexity run on Kaggle
 ├── results/                    # one folder per run (created by run_model)
 ├── src/
 │   ├── common.py               # config + JSON/JSONL helpers
 │   ├── data_gen/
 │   │   ├── fact_synthesis.py   # invent entities/facts, balanced planted values
+│   │   ├── complexity.py       # complexity dataset (levels L0-L3)
 │   │   ├── text_variants.py    # facts -> stimuli.jsonl
 │   │   └── tts.py              # statements -> audio
 │   ├── eval/
 │   │   ├── prompts.py          # forced-choice A/B prompt
 │   │   ├── logits.py           # model loading, logit readout, self-consistency
 │   │   ├── run_model.py        # run stimuli -> predictions.jsonl (resumable)
-│   │   └── metrics.py          # metrics.json + summary.md
+│   │   └── metrics.py          # A/B-order averaging, metrics.json + summary.md
 │   └── analysis/
-│       └── h1_h2_h3.py         # H1/H2/H3 buckets, chance tests, plot
+│       ├── h1_h2_h3.py         # H1/H2/H3 buckets, chance tests, plot
+│       └── complexity_sweep.py # per-level sweep, confidence-vs-conflict correlation
 └── requirements.txt
 ```
 
@@ -157,7 +181,9 @@ One stimulus per fact per condition:
 
 ### 1. Local setup and data generation (CPU)
 
-Run all commands from the repository root. The repo already contains the pilot data (15 fictitious facts, 8 control facts, 46 clips, 184 stimuli), so this step is only needed to change or regenerate it.
+Run all commands from the repository root. The repo already contains both datasets, so this step is only needed to change or regenerate them:
+- main pilot: 15 fictitious + 8 control facts, 46 clips, 230 items
+- complexity dataset: 12 facts × 4 levels, 96 clips, 480 items
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -166,6 +192,12 @@ pip install -r requirements.txt
 python -m src.data_gen.fact_synthesis --n 15   # invent facts (skim names; drop any that resemble real words)
 python -m src.data_gen.text_variants           # build stimuli for fictitious + positive-control facts
 python -m src.data_gen.tts                     # synthesize audio (needs internet; skips existing clips)
+
+# complexity dataset
+python -m src.data_gen.complexity --n 12
+python -m src.data_gen.text_variants --facts data/complexity/facts.json \
+    --audio-dir data/complexity/audio --out data/complexity/stimuli.jsonl
+python -m src.data_gen.tts --facts data/complexity/facts.json --out data/complexity/audio
 ```
 
 To test the pipeline without a GPU, `--mock` replaces the model with random answers:
@@ -184,14 +216,18 @@ python -m src.eval.run_model --mock --out results/mock
 What the notebook does:
 - clones the repo
 - picks fp16 (≥ 20 GB total VRAM) or 4-bit (a single 16 GB GPU)
-- runs 2 fictitious + 2 real facts × 8 conditions
+- runs 2 fictitious + 2 control facts × 8 conditions (36 items)
 - reports whether the logit readout is reliable (`mass_ab` and `greedy_agrees` both ≥ 0.9)
 
-After the smoke test passes, run the full pilot:
+After the smoke test passes, run `notebooks/kaggle_pilot.ipynb` the same way. It runs both datasets and their analyses:
 
 ```bash
 python -m src.eval.run_model --config configs/kaggle.yaml --out results/pilot_run_1
-python -m src.analysis.h1_h2_h3 --results results/pilot_run_1
+python -m src.analysis.h1_h2_h3 --results results/pilot_run_1 --kind fictitious
+
+python -m src.eval.run_model --config configs/kaggle.yaml \
+    --stimuli data/complexity/stimuli.jsonl --out results/complexity_run_1
+python -m src.analysis.complexity_sweep --results results/complexity_run_1
 ```
 
 Useful flags for `run_model`:
@@ -201,7 +237,8 @@ Useful flags for `run_model`:
 | `--limit N` | only the first N facts of each kind |
 | `--conditions ...` | run a subset of conditions |
 | `--uq self_consistency` | sampling-based confidence instead of logits |
-| `--kinds fictitious` | skip the positive control |
+| `--kinds fictitious` | only these dataset kinds (e.g. skip the control) |
+| `--stimuli PATH` | which stimuli file to run (default: main pilot) |
 | `--mock` | random answers, no model |
 
 Runs are resumable: finished stimuli are skipped when the same command is re-run.
@@ -210,10 +247,11 @@ Runs are resumable: finished stimuli are skipped when the same command is re-run
 
 | File | Content |
 |---|---|
-| `predictions.jsonl` | one row per stimulus: choice, P(A)/P(B), confidence, margin, `mass_ab`, greedy answer |
-| `metrics.json`, `summary.md` | per-condition and MCR-BENCH metrics |
-| `h_buckets.json` | per-fact H1/H2/H3 buckets and group-level tests |
-| `audio_conf_vs_conflict.png` | audio-only confidence vs. conflict outcome |
+| `predictions.jsonl` | one row per stimulus (and A/B order): choice, P(A)/P(B), confidence, margin, `mass_ab`, greedy answer |
+| `metrics.json`, `summary.md` | per-condition and MCR-BENCH metrics (A/B orders averaged) |
+| `h_buckets_<kind>.json` | per-fact H1/H2/H3 buckets and group-level tests |
+| `audio_conf_vs_conflict_<kind>.png` | audio-only confidence vs. conflict outcome |
+| `complexity_sweep.{json,md,png}` | per-level sweep (complexity runs) |
 | `config_used.json` | exact configuration of the run |
 
 ---

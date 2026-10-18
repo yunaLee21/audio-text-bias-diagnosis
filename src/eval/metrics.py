@@ -8,6 +8,9 @@ MCR-BENCH (Sec. 3, 2508.15407), with audio_only as the neutral condition:
 Conflict: text-follow rate over both conflict directions (0.5 = balanced, >0.5 = text bias)
 and Paper 2's Δ(T−A) = text-side accuracy − audio-side accuracy.
 
+Conflict items are run in both A/B orders; scores use collapse_orders(), which averages the two
+orders per option value. order-flip = share of items whose answer changed with the order alone.
+
     python -m src.eval.metrics --results results/pilot_run_1
 """
 
@@ -30,12 +33,54 @@ def _div(a, b):
     return a / b if a is not None and b else None
 
 
-def per_condition(rows):
+def collapse_orders(rows):
+    """Merge the A/B-order replicates of an item (same fact + condition) into one scored row.
+
+    Probabilities are averaged per option *value*, so a preference for a letter position cancels.
+    Items run in a single order pass through unchanged (apart from dropping the letter fields).
+    """
     groups = defaultdict(list)
     for r in rows:
+        groups[(r["fact_id"], r["condition"])].append(r)
+    out = []
+    for reps in groups.values():
+        p_value = defaultdict(list)
+        for r in reps:
+            for letter in "AB":
+                p_value[r["options"][letter]].append(r[f"p_{letter}"])
+        p = {v: mean(ps) for v, ps in p_value.items()}
+        chosen = max(p, key=p.get)
+        row = {k: v for k, v in reps[0].items()
+               if k not in ("stim_id", "options", "p_A", "p_B", "logit_A", "logit_B", "chosen_letter",
+                            "greedy_raw", "greedy_letter", "top_token", "samples")}
+        row.update(
+            item_id=f"{reps[0]['fact_id']}_{reps[0]['condition']}",
+            n_orders=len(reps),
+            p_value=p,
+            chosen_value=chosen,
+            correct=chosen == reps[0]["expected"],
+            confidence=p[chosen],
+            p_expected=p[reps[0]["expected"]],
+            margin=_mean([r.get("margin") for r in reps]),
+            mass_ab=_mean([r.get("mass_ab") for r in reps]),
+            # did the chosen value change when only the A/B order changed?
+            order_flip=len({r["chosen_value"] for r in reps}) > 1 if len(reps) > 1 else None,
+        )
+        out.append(row)
+    return out
+
+
+def per_condition(rows, items):
+    """rows: raw predictions (letter-level diagnostics); items: collapse_orders(rows) (scores)."""
+    raw = defaultdict(list)
+    for r in rows:
+        raw[(r["kind"], r["condition"])].append(r)
+    groups = defaultdict(list)
+    for r in items:
         groups[(r["kind"], r["condition"])].append(r)
     out = {}
     for (kind, cond), rs in sorted(groups.items()):
+        reps = raw[(kind, cond)]
         conflict = [r for r in rs if r["audio_value"] and r["text_value"] and r["audio_value"] != r["text_value"]]
         out[f"{kind}/{cond}"] = {
             "n": len(rs),
@@ -43,9 +88,11 @@ def per_condition(rows):
             "confidence": _mean([r["confidence"] for r in rs]),
             "p_expected": _mean([r["p_expected"] for r in rs]),
             "text_follow_rate": _mean([r["chosen_value"] == r["text_value"] for r in conflict]) if conflict else None,
-            "mass_ab": _mean([r.get("mass_ab") for r in rs]),
-            "greedy_agrees": _mean([r["greedy_letter"] == r["chosen_letter"] for r in rs if "greedy_letter" in r]),
-            "greedy_format_ok": _mean([r["greedy_letter"] is not None for r in rs if "greedy_letter" in r]),
+            "order_flip_rate": _mean([r["order_flip"] for r in rs]),
+            "share_B": _mean([r["chosen_letter"] == "B" for r in reps]),
+            "mass_ab": _mean([r.get("mass_ab") for r in reps]),
+            "greedy_agrees": _mean([r["greedy_letter"] == r["chosen_letter"] for r in reps if "greedy_letter" in r]),
+            "greedy_format_ok": _mean([r["greedy_letter"] is not None for r in reps if "greedy_letter" in r]),
         }
     return out
 
@@ -93,11 +140,12 @@ def conflict_metrics(rows, kind):
 
 
 def compute_all(rows):
+    items = collapse_orders(rows)
     kinds = sorted({r["kind"] for r in rows})
     return {
-        "per_condition": per_condition(rows),
-        "mcr": {k: mcr_metrics(rows, k) for k in kinds},
-        "conflict": {k: conflict_metrics(rows, k) for k in kinds},
+        "per_condition": per_condition(rows, items),
+        "mcr": {k: mcr_metrics(items, k) for k in kinds},
+        "conflict": {k: conflict_metrics(items, k) for k in kinds},
     }
 
 
@@ -106,12 +154,12 @@ def _fmt(x):
 
 
 def summary_markdown(metrics):
-    lines = ["| kind / condition | n | acc | conf | P(expected) | text-follow | mass(A,B) | greedy agrees |",
-             "|---|---|---|---|---|---|---|---|"]
+    lines = ["| kind / condition | n | acc | conf | P(expected) | text-follow | order-flip | share B | mass(A,B) | greedy agrees |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
     for key, m in metrics["per_condition"].items():
         lines.append(f"| {key} | {m['n']} | {_fmt(m['accuracy'])} | {_fmt(m['confidence'])} | "
-                     f"{_fmt(m['p_expected'])} | {_fmt(m['text_follow_rate'])} | {_fmt(m['mass_ab'])} | "
-                     f"{_fmt(m['greedy_agrees'])} |")
+                     f"{_fmt(m['p_expected'])} | {_fmt(m['text_follow_rate'])} | {_fmt(m['order_flip_rate'])} | "
+                     f"{_fmt(m['share_B'])} | {_fmt(m['mass_ab'])} | {_fmt(m['greedy_agrees'])} |")
     lines += ["", "| kind | text-follow (conflict) | Δ(T−A) | Norm adv | Norm irr | TIR fth | TIR adv | TIR irr | MRS |",
               "|---|---|---|---|---|---|---|---|---|"]
     for kind in metrics["mcr"]:

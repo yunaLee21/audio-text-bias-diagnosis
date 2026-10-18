@@ -1,90 +1,130 @@
 [
   {
     "fact_id": "p001",
-    "kind": "real",
-    "entity": "sun",
-    "attribute": "direction",
-    "question": "In which direction does the sun rise?",
-    "values": ["East", "West"],
-    "statements": {"East": "The sun rises in the east.", "West": "The sun rises in the west."},
-    "planted": "East",
-    "flipped": "West"
+    "kind": "control",
+    "attribute": "adjective",
+    "question": "What type of stations are shown in normal font?",
+    "values": [
+      "Closed",
+      "Open"
+    ],
+    "statements": {
+      "Closed": "Closed stations are shown in normal font.",
+      "Open": "Open stations are shown in normal font."
+    },
+    "planted": "Closed",
+    "flipped": "Open"
   },
   {
     "fact_id": "p002",
-    "kind": "real",
-    "entity": "France",
-    "attribute": "capital",
-    "question": "What is the capital of France?",
-    "values": ["Paris", "Rome"],
-    "statements": {"Paris": "The capital of France is Paris.", "Rome": "The capital of France is Rome."},
-    "planted": "Paris",
-    "flipped": "Rome"
-  },
-  {
-    "fact_id": "p003",
-    "kind": "real",
-    "entity": "spider",
-    "attribute": "legs",
-    "question": "How many legs does a spider have?",
-    "values": ["Eight", "Six"],
-    "statements": {"Eight": "A spider has eight legs.", "Six": "A spider has six legs."},
-    "planted": "Eight",
-    "flipped": "Six"
-  },
-  {
-    "fact_id": "p004",
-    "kind": "real",
-    "entity": "owl",
-    "attribute": "activity",
-    "question": "When are most owls active?",
-    "values": ["Day", "Night"],
-    "statements": {"Day": "Most owls sleep at night and are active during the day.", "Night": "Most owls sleep during the day and are active at night."},
-    "planted": "Night",
+    "kind": "control",
+    "attribute": "time",
+    "question": "What length of time is mentioned?",
+    "values": [
+      "Day",
+      "Week"
+    ],
+    "statements": {
+      "Day": "We've been laughing all day about that.",
+      "Week": "We've been laughing all week about that."
+    },
+    "planted": "Week",
     "flipped": "Day"
   },
   {
+    "fact_id": "p003",
+    "kind": "control",
+    "attribute": "number",
+    "question": "How many years later did the band dissolve?",
+    "values": [
+      "Two",
+      "Three"
+    ],
+    "statements": {
+      "Two": "The band dissolved two years later.",
+      "Three": "The band dissolved three years later."
+    },
+    "planted": "Two",
+    "flipped": "Three"
+  },
+  {
+    "fact_id": "p004",
+    "kind": "control",
+    "attribute": "negation",
+    "question": "Did the attorney recommend taking the offer?",
+    "values": [
+      "Recommended",
+      "Didn't recommend"
+    ],
+    "statements": {
+      "Recommended": "My attorney recommended that I take the offer.",
+      "Didn't recommend": "My attorney didn't recommend that I take the offer."
+    },
+    "planted": "Didn't recommend",
+    "flipped": "Recommended"
+  },
+  {
     "fact_id": "p005",
-    "kind": "real",
-    "entity": "banana",
-    "attribute": "color",
-    "question": "What color is a ripe banana?",
-    "values": ["Yellow", "Purple"],
-    "statements": {"Yellow": "A ripe banana is yellow.", "Purple": "A ripe banana is purple."},
-    "planted": "Yellow",
-    "flipped": "Purple"
+    "kind": "control",
+    "attribute": "adjective",
+    "question": "How big is the meeting room on the second floor?",
+    "values": [
+      "Small",
+      "Large"
+    ],
+    "statements": {
+      "Small": "The meeting room on the second floor is small.",
+      "Large": "The meeting room on the second floor is large."
+    },
+    "planted": "Large",
+    "flipped": "Small"
   },
   {
     "fact_id": "p006",
-    "kind": "real",
-    "entity": "penguin",
-    "attribute": "habitat",
-    "question": "Where do emperor penguins live?",
-    "values": ["Antarctica", "The Sahara"],
-    "statements": {"Antarctica": "Emperor penguins live in Antarctica.", "The Sahara": "Emperor penguins live in the Sahara."},
-    "planted": "Antarctica",
-    "flipped": "The Sahara"
+    "kind": "control",
+    "attribute": "number",
+    "question": "How many tickets did she buy for the concert?",
+    "values": [
+      "Four",
+      "Six"
+    ],
+    "statements": {
+      "Four": "She bought four tickets for the concert.",
+      "Six": "She bought six tickets for the concert."
+    },
+    "planted": "Four",
+    "flipped": "Six"
   },
   {
     "fact_id": "p007",
-    "kind": "real",
-    "entity": "Earth",
-    "attribute": "orbit",
-    "question": "What does the Earth orbit around?",
-    "values": ["The Sun", "The Moon"],
-    "statements": {"The Sun": "The Earth orbits around the Sun.", "The Moon": "The Earth orbits around the Moon."},
-    "planted": "The Sun",
-    "flipped": "The Moon"
+    "kind": "control",
+    "attribute": "time",
+    "question": "On which day does the shop close early?",
+    "values": [
+      "Monday",
+      "Friday"
+    ],
+    "statements": {
+      "Monday": "The shop closes early on Monday.",
+      "Friday": "The shop closes early on Friday."
+    },
+    "planted": "Friday",
+    "flipped": "Monday"
   },
   {
     "fact_id": "p008",
-    "kind": "real",
-    "entity": "cow",
-    "attribute": "diet",
-    "question": "What do cows mainly eat?",
-    "values": ["Grass", "Meat"],
-    "statements": {"Grass": "Cows mainly eat grass.", "Meat": "Cows mainly eat meat."},
-    "planted": "Grass",
-    "flipped": "Meat"
+    "kind": "control",
+    "attribute": "negation",
+    "question": "Was the train delayed this morning?",
+    "values": [
+      "Delayed",
+      "Not delayed"
+    ],
+    "statements": {
+      "Delayed": "The train was delayed this morning.",
+      "Not delayed": "The train wasn't delayed this morning."
+    },
+    "planted": "Delayed",
+    "flipped": "Not delayed"
   }
 ]

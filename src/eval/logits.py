@@ -14,7 +14,8 @@ import torch
 
 from src.eval.prompts import ANSWER_PREFIX
 
-LETTER_RE = re.compile(r'"answer"\s*:\s*"?\s*([AB])\b')
+# tolerates the formats seen in free-form output: "answer", 'answer', \"Answer\"
+LETTER_RE = re.compile(r'''answer['"\\]*\s*:\s*['"\\]*\s*([AB])\b''', re.IGNORECASE)
 
 
 def load_model(model_cfg):

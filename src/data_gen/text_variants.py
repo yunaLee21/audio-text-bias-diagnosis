@@ -4,7 +4,8 @@ Adapts MCR-BENCH's faithful / adversarial / irrelevant text conditions to invent
   faithful    -> text states the same value as the audio
   adversarial -> text states the other value (conflict_audio_correct)
   irrelevant  -> text is a different fact from the same pool (no real corpus to retrieve from)
-plus single-modality baselines and the reverse conflict direction.
+plus single-modality baselines and the reverse conflict direction. Conflict items are emitted in
+both A/B orders (stim_id suffix _o1 / _o2); metrics.collapse_orders() averages them.
 
     python -m src.data_gen.text_variants \
         --facts data/fictitious_facts/facts.json data/positive_control/facts.json \
@@ -31,6 +32,7 @@ CONDITIONS = {
     "conflict_text_correct":  ("flipped", "planted", "planted"),
     "irrelevant":             ("planted", "other",   "planted"),
 }
+COUNTERBALANCED = {"conflict_audio_correct", "conflict_text_correct"}
 
 
 def build_stimuli(facts, audio_dir, seed):
@@ -46,6 +48,8 @@ def build_stimuli(facts, audio_dir, seed):
                 continue
             options = list(fact["values"])
             rng.shuffle(options)  # randomize A/B position per stimulus (as in Paper 2)
+            # conflict items are run in both A/B orders; metrics average the two so position bias cancels
+            orders = [options, options[::-1]] if cond in COUNTERBALANCED else [options]
 
             if text_key == "other":
                 text, text_value = distractor["statements"][distractor["planted"]], None
@@ -55,21 +59,23 @@ def build_stimuli(facts, audio_dir, seed):
             else:
                 text, text_value = None, None
 
-            rows.append({
-                "stim_id": f"{fact['fact_id']}_{cond}",
-                "fact_id": fact["fact_id"],
-                "kind": fact["kind"],
-                "attribute": fact["attribute"],
-                "condition": cond,
-                "audio": audio_path(audio_dir, fact["fact_id"], audio_key) if audio_key else None,
-                "audio_value": fact[audio_key] if audio_key else None,
-                "text": text,
-                "text_value": text_value,
-                "question": fact["question"],
-                "options": {"A": options[0], "B": options[1]},
-                "expected": fact[expected_key],
-                "planted": fact["planted"],
-            })
+            for k, opts in enumerate(orders, 1):
+                rows.append({
+                    "stim_id": f"{fact['fact_id']}_{cond}" + (f"_o{k}" if len(orders) > 1 else ""),
+                    "fact_id": fact["fact_id"],
+                    "kind": fact["kind"],
+                    "level": fact.get("level"),
+                    "attribute": fact["attribute"],
+                    "condition": cond,
+                    "audio": audio_path(audio_dir, fact["fact_id"], audio_key) if audio_key else None,
+                    "audio_value": fact[audio_key] if audio_key else None,
+                    "text": text,
+                    "text_value": text_value,
+                    "question": fact["question"],
+                    "options": {"A": opts[0], "B": opts[1]},
+                    "expected": fact[expected_key],
+                    "planted": fact["planted"],
+                })
     return rows
 
 
