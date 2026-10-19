@@ -6,7 +6,7 @@ When an Audio-Language Model (Audio-LLM) receives audio together with text that 
 
 To remove both confounds by construction, the benchmark uses **fully fictitious facts**: invented creatures with invented attributes, read aloud with text-to-speech. It then uses each sample's **single-modality confidence** to tell genuine suppression apart from weak audio understanding and from answering out of memory.
 
-**Status:** the pilot pipeline is implemented (data generation → evaluation → analysis), and a smoke test on Qwen2-Audio-7B-Instruct confirmed that the logit readout is reliable. Next: the full pilot and the complexity dataset.
+**Status:** the pilot pipeline is implemented (data generation → evaluation → analysis). Smoke tests on Qwen2-Audio-7B-Instruct confirmed that the logit readout is reliable, and showed that under conflict the A/B answer is driven mostly by option position. An order-free Yes/No readout is now the primary measure. Next: the full pilot and the complexity dataset.
 
 ---
 
@@ -106,12 +106,21 @@ One item per fact per condition. The two conflict conditions are run in **both A
 | `conflict_audio_correct` | planted | flipped | planted | MCR-BENCH adversarial; H1 test |
 | `conflict_text_correct` | flipped | planted | planted | reverse conflict direction |
 | `irrelevant` | planted | another fact | planted | MCR-BENCH irrelevant |
+| `no_input` | – | – | – | question only: each value's prior likelihood (calibrates the Yes/No readout) |
 
-### Prompt and confidence readout
+### Prompts and readouts
 
-- **Format:** forced choice between A and B, using the strict-JSON prompt from *Who Wins the Conflict?* [3]. The A/B position is randomized per item, and conflict items are run in both orders.
-- **Logit readout (default):** the assistant turn is pre-filled with `{"answer":"`, so the next token is the answer letter. Its logits give P(A) and P(B). In Qwen2-Audio's tokenizer, `A` and `B` are single tokens.
-- **Sanity checks:** each prediction also records `mass_ab`, the share of full-vocabulary probability on A or B, and the model's free-form greedy answer. Together they show whether the logit readout matches what the model actually says.
+Both readouts use the strict-JSON prompt from *Who Wins the Conflict?* [3], with the assistant turn pre-filled with `{"answer":"` so that the next token is the answer. Its logits give the answer probabilities.
+
+- **Yes/No (primary):** one question per answer value, e.g. *"Does the Pemoux have six legs?"* and *"Does the Pemoux have four legs?"*.
+  - There is no option list, so option order cannot affect the answer.
+  - A value's score is log-odds(Yes) = logit(Yes) − logit(No). The model's answer is the value with the higher score, so a general yes-bias applies to both values and cancels (as in POPE-style polling).
+  - `Yes` and `No` are single tokens in Qwen2-Audio's tokenizer.
+- **A/B (secondary):** forced choice between two listed options, as in [3], so results stay comparable with that paper.
+  - The A/B position is randomized per item, and conflict items are run in both orders.
+  - `A` and `B` are single tokens.
+- **Why both:** the smoke tests showed that under conflict the A/B answer is driven mostly by option position (the model picks the second option), not by modality.
+- **Sanity checks:** each prediction records `mass_ab` / `mass_yn` (the share of full-vocabulary probability on A+B or Yes+No) and, for A/B, the model's free-form greedy answer.
 - **Self-consistency (fallback):** sample *n* free-form answers and use the share of the majority letter as the confidence.
 - **Prompt variant:** `mcr` adds MCR-BENCH's "may be accurate, inaccurate, or irrelevant" disclaimer. The input order (`text_first` / `audio_first`) is configurable.
 
@@ -122,10 +131,14 @@ One item per fact per condition. The two conflict conditions are run in **both A
   - mean confidence
   - P(expected answer)
   - text-follow rate
-  - order-flip rate and share of "B" answers (position-bias diagnostics)
+  - order-flip rate and share of "B" answers (A/B position-bias diagnostics)
 - **Conflict:**
   - text-follow rate over both conflict directions (0.5 = balanced)
   - Δ(T−A) = text-side accuracy − audio-side accuracy
+- **Content vs. position** (per conflict item; > 0 means the audio value wins):
+  - A/B: with m_A, m_B = logit(audio value) − logit(text value) when the audio value sits in slot A / slot B,
+    content = (m_A + m_B) / 2 and position = (m_B − m_A) / 2 (> 0 = slot B favoured)
+  - Yes/No: content = log-odds(Yes | audio value) − log-odds(Yes | text value), optionally calibrated by subtracting the same difference in the `no_input` item. Averaged over both conflict directions the value prior cancels by design, so calibration only changes per-item results.
 - **MCR-BENCH** [1], with `audio_only` as the neutral condition:
   - Normalized accuracy Norm_t = C_t / C_neu
   - Macro accuracy
@@ -137,6 +150,7 @@ One item per fact per condition. The two conflict conditions are run in **both A
   - input-tracking rate (answer flips when the stated value flips)
   - A/B position bias
   - a scatter plot of audio-only confidence vs. the conflict outcome
+  - `--readout yes_no` (default) or `--readout ab`
 - **Complexity sweep:** per level, audio-only / text-only confidence, input tracking and conflict text-follow; Spearman ρ between audio-only confidence and the conflict outcome across all (fact, level) items
 
 ---
@@ -162,13 +176,14 @@ One item per fact per condition. The two conflict conditions are run in **both A
 │   ├── data_gen/
 │   │   ├── fact_synthesis.py   # invent entities/facts, balanced planted values
 │   │   ├── complexity.py       # complexity dataset (levels L0-L3)
+│   │   ├── yes_no.py           # Yes/No question per answer value
 │   │   ├── text_variants.py    # facts -> stimuli.jsonl
 │   │   └── tts.py              # statements -> audio
 │   ├── eval/
-│   │   ├── prompts.py          # forced-choice A/B prompt
-│   │   ├── logits.py           # model loading, logit readout, self-consistency
+│   │   ├── prompts.py          # A/B and Yes/No prompts
+│   │   ├── logits.py           # model loading, A/B and Yes/No readouts, self-consistency
 │   │   ├── run_model.py        # run stimuli -> predictions.jsonl (resumable)
-│   │   └── metrics.py          # A/B-order averaging, metrics.json + summary.md
+│   │   └── metrics.py          # both readouts, content/position split, metrics.json + summary.md
 │   └── analysis/
 │       ├── h1_h2_h3.py         # H1/H2/H3 buckets, chance tests, plot
 │       └── complexity_sweep.py # per-level sweep, confidence-vs-conflict correlation
@@ -182,8 +197,8 @@ One item per fact per condition. The two conflict conditions are run in **both A
 ### 1. Local setup and data generation (CPU)
 
 Run all commands from the repository root. The repo already contains both datasets, so this step is only needed to change or regenerate them:
-- main pilot: 15 fictitious + 8 control facts, 46 clips, 230 items
-- complexity dataset: 12 facts × 4 levels, 96 clips, 480 items
+- main pilot: 15 fictitious + 8 control facts, 46 clips, 253 items
+- complexity dataset: 12 facts × 4 levels, 96 clips, 528 items
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -216,18 +231,18 @@ python -m src.eval.run_model --mock --out results/mock
 What the notebook does:
 - clones the repo
 - picks fp16 (≥ 20 GB total VRAM) or 4-bit (a single 16 GB GPU)
-- runs 2 fictitious + 2 control facts × 8 conditions (36 items)
-- reports whether the logit readout is reliable (`mass_ab` and `greedy_agrees` both ≥ 0.9)
+- runs 2 fictitious + 2 control facts × 9 conditions (44 items)
+- reports whether both readouts are reliable (`mass_ab`, `greedy_agrees` and `mass_yn` all ≥ 0.9)
 
 After the smoke test passes, run `notebooks/kaggle_pilot.ipynb` the same way. It runs both datasets and their analyses:
 
 ```bash
 python -m src.eval.run_model --config configs/kaggle.yaml --out results/pilot_run_1
-python -m src.analysis.h1_h2_h3 --results results/pilot_run_1 --kind fictitious
+python -m src.analysis.h1_h2_h3 --results results/pilot_run_1 --kind fictitious   # add --readout ab for A/B
 
 python -m src.eval.run_model --config configs/kaggle.yaml \
     --stimuli data/complexity/stimuli.jsonl --out results/complexity_run_1
-python -m src.analysis.complexity_sweep --results results/complexity_run_1
+python -m src.analysis.complexity_sweep --results results/complexity_run_1        # add --readout ab for A/B
 ```
 
 Useful flags for `run_model`:
@@ -248,10 +263,10 @@ Runs are resumable: finished stimuli are skipped when the same command is re-run
 | File | Content |
 |---|---|
 | `predictions.jsonl` | one row per stimulus (and A/B order): choice, P(A)/P(B), confidence, margin, `mass_ab`, greedy answer |
-| `metrics.json`, `summary.md` | per-condition and MCR-BENCH metrics (A/B orders averaged) |
-| `h_buckets_<kind>.json` | per-fact H1/H2/H3 buckets and group-level tests |
-| `audio_conf_vs_conflict_<kind>.png` | audio-only confidence vs. conflict outcome |
-| `complexity_sweep.{json,md,png}` | per-level sweep (complexity runs) |
+| `metrics.json`, `summary.md` | per-condition and MCR-BENCH metrics for both readouts, plus the content/position table |
+| `h_buckets_<kind>_<readout>.json` | per-fact H1/H2/H3 buckets and group-level tests |
+| `audio_conf_vs_conflict_<kind>_<readout>.png` | audio-only confidence vs. conflict outcome |
+| `complexity_sweep_<readout>.{json,md,png}` | per-level sweep (complexity runs) |
 | `config_used.json` | exact configuration of the run |
 
 ---

@@ -13,7 +13,11 @@
       "Open": "Open stations are shown in normal font."
     },
     "planted": "Closed",
-    "flipped": "Open"
+    "flipped": "Open",
+    "yes_no": {
+      "Closed": "Are closed stations shown in normal font?",
+      "Open": "Are open stations shown in normal font?"
+    }
   },
   {
     "fact_id": "p002",
@@ -29,7 +33,11 @@
       "Week": "We've been laughing all week about that."
     },
     "planted": "Week",
-    "flipped": "Day"
+    "flipped": "Day",
+    "yes_no": {
+      "Day": "Is the length of time mentioned a day?",
+      "Week": "Is the length of time mentioned a week?"
+    }
   },
   {
     "fact_id": "p003",
@@ -45,7 +53,11 @@
       "Three": "The band dissolved three years later."
     },
     "planted": "Two",
-    "flipped": "Three"
+    "flipped": "Three",
+    "yes_no": {
+      "Two": "Did the band dissolve two years later?",
+      "Three": "Did the band dissolve three years later?"
+    }
   },
   {
     "fact_id": "p004",
@@ -61,7 +73,11 @@
       "Didn't recommend": "My attorney didn't recommend that I take the offer."
     },
     "planted": "Didn't recommend",
-    "flipped": "Recommended"
+    "flipped": "Recommended",
+    "yes_no": {
+      "Recommended": "Did the attorney recommend taking the offer?",
+      "Didn't recommend": "Did the attorney advise against taking the offer?"
+    }
   },
   {
     "fact_id": "p005",
@@ -77,7 +93,11 @@
       "Large": "The meeting room on the second floor is large."
     },
     "planted": "Large",
-    "flipped": "Small"
+    "flipped": "Small",
+    "yes_no": {
+      "Small": "Is the meeting room on the second floor small?",
+      "Large": "Is the meeting room on the second floor large?"
+    }
   },
   {
     "fact_id": "p006",
@@ -93,7 +113,11 @@
       "Six": "She bought six tickets for the concert."
     },
     "planted": "Four",
-    "flipped": "Six"
+    "flipped": "Six",
+    "yes_no": {
+      "Four": "Did she buy four tickets for the concert?",
+      "Six": "Did she buy six tickets for the concert?"
+    }
   },
   {
     "fact_id": "p007",
@@ -109,7 +133,11 @@
       "Friday": "The shop closes early on Friday."
     },
     "planted": "Friday",
-    "flipped": "Monday"
+    "flipped": "Monday",
+    "yes_no": {
+      "Monday": "Does the shop close early on Monday?",
+      "Friday": "Does the shop close early on Friday?"
+    }
   },
   {
     "fact_id": "p008",
@@ -125,6 +153,10 @@
       "Not delayed": "The train wasn't delayed this morning."
     },
     "planted": "Delayed",
-    "flipped": "Not delayed"
+    "flipped": "Not delayed",
+    "yes_no": {
+      "Delayed": "Was the train delayed this morning?",
+      "Not delayed": "Was the train on time this morning?"
+    }
   }
 ]

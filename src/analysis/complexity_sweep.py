@@ -9,7 +9,8 @@ conflict_audio_correct, P(audio value).
 Compare text-follow only against the baselines of the same level: a harder sentence is harder to
 hear than to read, so the levels are not equally difficult for the two modalities.
 
-    python -m src.analysis.complexity_sweep --results results/complexity_run_1
+    python -m src.analysis.complexity_sweep --results results/complexity_run_1             # Yes/No readout
+    python -m src.analysis.complexity_sweep --results results/complexity_run_1 --readout ab
 """
 
 import argparse
@@ -17,7 +18,7 @@ from collections import defaultdict
 from statistics import mean
 
 from src.common import read_jsonl, resolve, write_json
-from src.eval.metrics import collapse_orders
+from src.eval.metrics import readout_items
 
 CONFLICT = ("conflict_audio_correct", "conflict_text_correct")
 
@@ -36,8 +37,8 @@ def spearman(xs, ys):
         return None, None
 
 
-def sweep(rows):
-    items = collapse_orders([r for r in rows if str(r["kind"]).startswith("complexity_")])
+def sweep(rows, readout="yes_no"):
+    items = readout_items([r for r in rows if str(r["kind"]).startswith("complexity_")], readout)
     by_level = defaultdict(lambda: defaultdict(list))
     by_item = defaultdict(dict)
     for r in items:
@@ -67,7 +68,7 @@ def sweep(rows):
     pairs = [(f["audio_only"]["p_expected"], f["conflict_audio_correct"]["p_expected"])
              for f in by_item.values() if "audio_only" in f and "conflict_audio_correct" in f]
     rho, p = spearman(*zip(*pairs)) if len(pairs) > 2 else (None, None)
-    return {"levels": levels, "audio_conf_vs_conflict": {"n": len(pairs), "spearman_rho": rho, "p": p}}
+    return {"readout": readout, "levels": levels, "audio_conf_vs_conflict": {"n": len(pairs), "spearman_rho": rho, "p": p}}
 
 
 def _fmt(x):
@@ -99,7 +100,7 @@ def plot(res, path):
                        ("text_follow", "conflict text-follow rate")]:
         ax.plot(names, [res["levels"][n][key] for n in names], marker="o", label=label)
     ax.axhline(0.5, color="grey", lw=0.8, ls="--")
-    ax.set(ylim=(0, 1.02), xlabel="complexity level", title="Complexity sweep")
+    ax.set(ylim=(0, 1.02), xlabel="complexity level", title=f"Complexity sweep ({res['readout']})")
     ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
@@ -109,15 +110,17 @@ def plot(res, path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--results", required=True)
+    ap.add_argument("--readout", default="yes_no", choices=["yes_no", "ab"])
     args = ap.parse_args()
 
     run = resolve(args.results)
-    res = sweep(read_jsonl(run / "predictions.jsonl"))
-    write_json(res, run / "complexity_sweep.json")
+    res = sweep(read_jsonl(run / "predictions.jsonl"), args.readout)
+    tag = f"complexity_sweep_{args.readout}"
+    write_json(res, run / f"{tag}.json")
     md = markdown(res)
-    (run / "complexity_sweep.md").write_text(md, encoding="utf-8")
-    if plot(res, run / "complexity_sweep.png"):
-        print(f"figure: {run / 'complexity_sweep.png'}")
+    (run / f"{tag}.md").write_text(md, encoding="utf-8")
+    if plot(res, run / f"{tag}.png"):
+        print(f"figure: {run / f'{tag}.png'}")
     print(md)
 
 

@@ -8,13 +8,23 @@ MCR-BENCH (Sec. 3, 2508.15407), with audio_only as the neutral condition:
 Conflict: text-follow rate over both conflict directions (0.5 = balanced, >0.5 = text bias)
 and Paper 2's Δ(T−A) = text-side accuracy − audio-side accuracy.
 
-Conflict items are run in both A/B orders; scores use collapse_orders(), which averages the two
-orders per option value. order-flip = share of items whose answer changed with the order alone.
+Two readouts are scored with the same metrics:
+  ab      A/B forced choice. Conflict items are run in both orders; collapse_orders() averages the
+          two per option value. order-flip = share of items whose answer changed with the order alone.
+  yes_no  one Yes/No question per value (no option list); value score = log-odds(Yes).
+Order-free conflict decomposition (per item, signed so that > 0 means the AUDIO value wins):
+  A/B     m_A, m_B = logit(audio value) - logit(text value) with the audio value in slot A / slot B;
+          content = (m_A + m_B) / 2, position = (m_B - m_A) / 2 (> 0 = slot B favoured).
+  Yes/No  content = log-odds(Yes | audio value) - log-odds(Yes | text value);
+          calibrated = the same minus its value in the question-only (no_input) item of that fact.
+          Averaged over both conflict directions the value prior cancels by design (each fact appears
+          with the audio/text values swapped), so calibration only changes per-item results.
 
     python -m src.eval.metrics --results results/pilot_run_1
 """
 
 import argparse
+import math
 from collections import defaultdict
 from statistics import mean
 
@@ -44,6 +54,7 @@ def collapse_orders(rows):
         groups[(r["fact_id"], r["condition"])].append(r)
     out = []
     for reps in groups.values():
+        yn = next((r["yes_no_out"] for r in reps if r.get("yes_no_out")), None)
         p_value = defaultdict(list)
         for r in reps:
             for letter in "AB":
@@ -65,13 +76,80 @@ def collapse_orders(rows):
             mass_ab=_mean([r.get("mass_ab") for r in reps]),
             # did the chosen value change when only the A/B order changed?
             order_flip=len({r["chosen_value"] for r in reps}) > 1 if len(reps) > 1 else None,
+            yes_no_out=yn,
+            **_ab_content_position(reps),
         )
         out.append(row)
     return out
 
 
+def _ab_content_position(reps):
+    """Split a counterbalanced conflict pair into content and position effects (logit units)."""
+    r0 = reps[0]
+    audio, text = r0["audio_value"], r0["text_value"]
+    if len(reps) != 2 or not audio or not text or audio == text or "logit_A" not in r0:
+        return {}
+    m = {}
+    for r in reps:
+        slot = "A" if r["options"]["A"] == audio else "B"
+        other = "B" if slot == "A" else "A"
+        m[slot] = r[f"logit_{slot}"] - r[f"logit_{other}"]
+    if set(m) != {"A", "B"}:
+        return {}
+    return {"ab_m_audio_in_A": m["A"], "ab_m_audio_in_B": m["B"],
+            "ab_content": (m["A"] + m["B"]) / 2, "ab_position": (m["B"] - m["A"]) / 2}
+
+
+def _sigmoid(x):
+    return 1 / (1 + math.exp(-x))
+
+
+def yes_no_items(items):
+    """Re-score A/B-collapsed items with the Yes/No readout (same field names, so all metrics apply)."""
+    prior = {r["fact_id"]: r["yes_no_out"] for r in items
+             if r["condition"] == "no_input" and r.get("yes_no_out")}
+    out = []
+    for r in items:
+        yn = r.get("yes_no_out")
+        if not yn:
+            continue
+        lo = {v: o["log_odds"] for v, o in yn.items()}
+        exp = r["expected"]
+        other = next(v for v in lo if v != exp)
+        margin = lo[exp] - lo[other]
+        row = {k: v for k, v in r.items() if not k.startswith("ab_") and k not in ("p_value", "order_flip", "mass_ab")}
+        row.update(
+            yn_log_odds=lo,
+            margin=margin,
+            chosen_value=max(lo, key=lo.get),
+            correct=lo[exp] >= lo[other],
+            p_expected=_sigmoid(margin),
+            confidence=_sigmoid(abs(margin)),
+            mass_yn=_mean([o.get("mass_yn") for o in yn.values()]),
+            order_flip=None,
+        )
+        audio, text = r["audio_value"], r["text_value"]
+        if audio and text and audio != text:
+            row["yn_content"] = lo[audio] - lo[text]
+            p0 = prior.get(r["fact_id"])
+            if p0:
+                row["yn_content_cal"] = row["yn_content"] - (p0[audio]["log_odds"] - p0[text]["log_odds"])
+        out.append(row)
+    return out
+
+
+def readout_items(rows, readout="yes_no"):
+    """One scored row per item for the chosen readout (falls back to ab for runs without Yes/No)."""
+    items = collapse_orders(rows)
+    if readout == "yes_no":
+        yn = yes_no_items(items)
+        if yn:
+            return yn
+    return items
+
+
 def per_condition(rows, items):
-    """rows: raw predictions (letter-level diagnostics); items: collapse_orders(rows) (scores)."""
+    """rows: raw predictions (letter-level diagnostics); items: one scored row per item."""
     raw = defaultdict(list)
     for r in rows:
         raw[(r["kind"], r["condition"])].append(r)
@@ -91,6 +169,7 @@ def per_condition(rows, items):
             "order_flip_rate": _mean([r["order_flip"] for r in rs]),
             "share_B": _mean([r["chosen_letter"] == "B" for r in reps]),
             "mass_ab": _mean([r.get("mass_ab") for r in reps]),
+            "mass_yn": _mean([r.get("mass_yn") for r in rs]),
             "greedy_agrees": _mean([r["greedy_letter"] == r["chosen_letter"] for r in reps if "greedy_letter" in r]),
             "greedy_format_ok": _mean([r["greedy_letter"] is not None for r in reps if "greedy_letter" in r]),
         }
@@ -139,9 +218,26 @@ def conflict_metrics(rows, kind):
     }
 
 
-def compute_all(rows):
-    items = collapse_orders(rows)
-    kinds = sorted({r["kind"] for r in rows})
+def order_free(ab_items, yn_items, kind):
+    """Conflict decomposition for one kind; all values signed so that > 0 = audio wins."""
+    ab = [r for r in ab_items if r["kind"] == kind and "ab_content" in r]
+    yn = [r for r in yn_items if r["kind"] == kind and "yn_content" in r]
+    if not ab and not yn:
+        return None
+    return {
+        "n_ab": len(ab),
+        "ab_content": _mean([r["ab_content"] for r in ab]),
+        "ab_abs_position": _mean([abs(r["ab_position"]) for r in ab]),
+        "ab_position": _mean([r["ab_position"] for r in ab]),
+        "ab_position_dominated": _mean([abs(r["ab_position"]) > abs(r["ab_content"]) for r in ab]),
+        "n_yn": len(yn),
+        "yn_content": _mean([r["yn_content"] for r in yn]),
+        "yn_audio_wins": _mean([r["yn_content"] > 0 for r in yn]),
+        "yn_audio_wins_cal": _mean([r["yn_content_cal"] > 0 for r in yn if "yn_content_cal" in r]),
+    }
+
+
+def _readout_metrics(rows, items, kinds):
     return {
         "per_condition": per_condition(rows, items),
         "mcr": {k: mcr_metrics(items, k) for k in kinds},
@@ -149,25 +245,64 @@ def compute_all(rows):
     }
 
 
+def compute_all(rows):
+    ab_items = collapse_orders(rows)
+    yn_items = yes_no_items(ab_items)
+    kinds = sorted({r["kind"] for r in rows})
+    res = {"ab": _readout_metrics(rows, ab_items, kinds)}
+    if yn_items:
+        res["yes_no"] = _readout_metrics(rows, yn_items, kinds)
+    res["order_free"] = {k: order_free(ab_items, yn_items, k) for k in kinds}
+    return res
+
+
 def _fmt(x):
     return "–" if x is None else f"{x:.2f}"
 
 
+def _mcr_table(m):
+    lines = ["| kind | text-follow (conflict) | Δ(T−A) | Norm adv | Norm irr | TIR fth | TIR adv | TIR irr | MRS |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for kind in m["mcr"]:
+        c, r = m["conflict"][kind] or {}, m["mcr"][kind] or {}
+        norm, tir = r.get("norm", {}), r.get("tir", {})
+        lines.append(f"| {kind} | {_fmt(c.get('text_follow_rate'))} | {_fmt(c.get('delta_text_minus_audio'))} | "
+                     f"{_fmt(norm.get('adv'))} | {_fmt(norm.get('irr'))} | {_fmt(tir.get('fth'))} | "
+                     f"{_fmt(tir.get('adv'))} | {_fmt(tir.get('irr'))} | {_fmt(r.get('mrs'))} |")
+    return lines
+
+
 def summary_markdown(metrics):
-    lines = ["| kind / condition | n | acc | conf | P(expected) | text-follow | order-flip | share B | mass(A,B) | greedy agrees |",
-             "|---|---|---|---|---|---|---|---|---|---|"]
-    for key, m in metrics["per_condition"].items():
+    lines = []
+    if "yes_no" in metrics:
+        yn = metrics["yes_no"]
+        lines += ["## Yes/No readout (primary: no option list, no order effect)", "",
+                  "| kind / condition | n | acc | conf | P(expected) | text-follow | mass(Yes,No) |",
+                  "|---|---|---|---|---|---|---|"]
+        for key, m in yn["per_condition"].items():
+            lines.append(f"| {key} | {m['n']} | {_fmt(m['accuracy'])} | {_fmt(m['confidence'])} | "
+                         f"{_fmt(m['p_expected'])} | {_fmt(m['text_follow_rate'])} | {_fmt(m['mass_yn'])} |")
+        lines += [""] + _mcr_table(yn) + [""]
+
+    ab = metrics["ab"]
+    lines += ["## A/B readout (comparable to Paper 2; conflict orders averaged)", "",
+              "| kind / condition | n | acc | conf | P(expected) | text-follow | order-flip | share B | mass(A,B) | greedy agrees |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+    for key, m in ab["per_condition"].items():
         lines.append(f"| {key} | {m['n']} | {_fmt(m['accuracy'])} | {_fmt(m['confidence'])} | "
                      f"{_fmt(m['p_expected'])} | {_fmt(m['text_follow_rate'])} | {_fmt(m['order_flip_rate'])} | "
                      f"{_fmt(m['share_B'])} | {_fmt(m['mass_ab'])} | {_fmt(m['greedy_agrees'])} |")
-    lines += ["", "| kind | text-follow (conflict) | Δ(T−A) | Norm adv | Norm irr | TIR fth | TIR adv | TIR irr | MRS |",
-              "|---|---|---|---|---|---|---|---|---|"]
-    for kind in metrics["mcr"]:
-        c, m = metrics["conflict"][kind] or {}, metrics["mcr"][kind] or {}
-        norm, tir = m.get("norm", {}), m.get("tir", {})
-        lines.append(f"| {kind} | {_fmt(c.get('text_follow_rate'))} | {_fmt(c.get('delta_text_minus_audio'))} | "
-                     f"{_fmt(norm.get('adv'))} | {_fmt(norm.get('irr'))} | {_fmt(tir.get('fth'))} | "
-                     f"{_fmt(tir.get('adv'))} | {_fmt(tir.get('irr'))} | {_fmt(m.get('mrs'))} |")
+    lines += [""] + _mcr_table(ab)
+
+    lines += ["", "## Conflict: content vs. position (log-odds / logit units; > 0 = audio wins)", "",
+              "| kind | A/B content | A/B position (+ = slot B) | A/B mean abs. position | A/B position-dominated | "
+              "Yes/No content | Yes/No audio wins | Yes/No audio wins (calibrated) |",
+              "|---|---|---|---|---|---|---|---|"]
+    for kind, d in metrics["order_free"].items():
+        if d:
+            lines.append(f"| {kind} | {_fmt(d['ab_content'])} | {_fmt(d['ab_position'])} | {_fmt(d['ab_abs_position'])} | "
+                         f"{_fmt(d['ab_position_dominated'])} | {_fmt(d['yn_content'])} | {_fmt(d['yn_audio_wins'])} | "
+                         f"{_fmt(d['yn_audio_wins_cal'])} |")
     return "\n".join(lines) + "\n"
 
 

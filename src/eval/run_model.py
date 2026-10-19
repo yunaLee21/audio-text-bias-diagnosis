@@ -11,6 +11,7 @@ Colab/Kaggle session that dies mid-run can simply be restarted with the same com
 
 import argparse
 import json
+import math
 import random
 
 from src.common import load_config, read_jsonl, resolve
@@ -21,14 +22,24 @@ from src.eval.prompts import build_conversation
 def predict(stim, backend, cfg):
     """Return the model-side fields of one prediction row."""
     conv = build_conversation(stim, cfg["prompt"]["variant"], cfg["prompt"]["order"])
+    ev = cfg["eval"]
+    # Yes/No polling does not depend on the A/B order: run it once per item, on the first order only
+    want_yn = "yes_no" in ev.get("readouts", ["ab"]) and not stim["stim_id"].endswith("_o2")
+
     if backend == "mock":
-        p_a = random.random()
-        return {"p_A": p_a, "p_B": 1 - p_a}
+        la, lb = random.gauss(0, 2), random.gauss(0, 2)
+        p_a = math.exp(la) / (math.exp(la) + math.exp(lb))
+        out = {"logit_A": la, "logit_B": lb, "p_A": p_a, "p_B": 1 - p_a}
+        if want_yn:
+            out["yes_no_out"] = {}
+            for v in stim["yes_no"]:
+                lo = random.gauss(0, 2)
+                out["yes_no_out"][v] = {"log_odds": lo, "p_yes": 1 / (1 + math.exp(-lo)), "mass_yn": 1.0}
+        return out
 
     from src.eval import logits as L
     model, processor = backend
     audio = L.load_audio(str(resolve(stim["audio"])), processor) if stim["audio"] else None
-    ev = cfg["eval"]
     if ev["uq"] == "logit":
         out = L.logit_readout(model, processor, conv, audio)
     else:
@@ -36,6 +47,12 @@ def predict(stim, backend, cfg):
     if ev.get("greedy_check"):
         raw = L.generate(model, processor, conv, audio)[0]
         out.update(greedy_raw=raw, greedy_letter=L.parse_letter(raw))
+    if want_yn:
+        out["yes_no_out"] = {
+            v: L.yes_no_readout(model, processor,
+                                build_conversation(stim, cfg["prompt"]["variant"], cfg["prompt"]["order"], v), audio)
+            for v in stim["yes_no"]
+        }
     return out
 
 

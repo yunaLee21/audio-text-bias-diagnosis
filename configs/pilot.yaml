@@ -38,10 +38,14 @@ eval:
     - conflict_audio_correct
     - conflict_text_correct
     - irrelevant
+    - no_input              # question only: prior baseline for the Yes/No readout
   # logit: one forward pass, read P(A) vs P(B) at the first answer token (preferred).
   # self_consistency: sample n times, confidence = share of the majority letter (fallback).
   uq: logit
   n_samples: 10
   temperature: 1.0
+  # ab:     forced choice A/B (comparable to Paper 2; conflict items in both orders -> content/position split)
+  # yes_no: one Yes/No question per answer value (no option list, so no order effect) -- primary readout
+  readouts: [ab, yes_no]
   # Also run one greedy generation per stimulus to check the logit readout matches the real output.
   greedy_check: true

@@ -4,7 +4,7 @@ Adapts MCR-BENCH's faithful / adversarial / irrelevant text conditions to invent
   faithful    -> text states the same value as the audio
   adversarial -> text states the other value (conflict_audio_correct)
   irrelevant  -> text is a different fact from the same pool (no real corpus to retrieve from)
-plus single-modality baselines and the reverse conflict direction. Conflict items are emitted in
+plus single-modality baselines, a question-only baseline and the reverse conflict direction. Conflict items are emitted in
 both A/B orders (stim_id suffix _o1 / _o2); metrics.collapse_orders() averages them.
 
     python -m src.data_gen.text_variants \
@@ -19,6 +19,7 @@ import argparse
 import random
 
 from src.common import audio_path, read_json, write_jsonl
+from src.data_gen.yes_no import questions
 
 # condition -> (audio clip, text statement, expected answer)
 #   'planted' / 'flipped' name which value that modality states; None = modality absent.
@@ -31,6 +32,8 @@ CONDITIONS = {
     "conflict_audio_correct": ("planted", "flipped", "planted"),  # MCR-BENCH "adversarial"
     "conflict_text_correct":  ("flipped", "planted", "planted"),
     "irrelevant":             ("planted", "other",   "planted"),
+    # question only: baseline for each value's prior likelihood (calibrates the Yes/No readout)
+    "no_input":               (None,      None,      "planted"),
 }
 COUNTERBALANCED = {"conflict_audio_correct", "conflict_text_correct"}
 
@@ -72,6 +75,7 @@ def build_stimuli(facts, audio_dir, seed):
                     "text": text,
                     "text_value": text_value,
                     "question": fact["question"],
+                    "yes_no": questions(fact),
                     "options": {"A": opts[0], "B": opts[1]},
                     "expected": fact[expected_key],
                     "planted": fact["planted"],

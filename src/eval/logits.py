@@ -62,31 +62,48 @@ def prepare_inputs(model, processor, conversation, audio, prefill):
     return inputs
 
 
-def letter_token_ids(tokenizer):
+def answer_token_ids(tokenizer, words):
     ids = {}
-    for letter in "AB":
-        toks = tokenizer.encode(letter, add_special_tokens=False)
+    for word in words:
+        toks = tokenizer.encode(word, add_special_tokens=False)
         if len(toks) != 1:
-            raise RuntimeError(f"'{letter}' is not a single token ({toks}); logit readout would be wrong")
-        ids[letter] = toks[0]
+            raise RuntimeError(f"'{word}' is not a single token ({toks}); logit readout would be wrong")
+        ids[word] = toks[0]
     return ids
 
 
 @torch.no_grad()
-def logit_readout(model, processor, conversation, audio):
+def _next_token_pair(model, processor, conversation, audio, words):
+    """Logits of two candidate answer tokens right after the pre-filled answer prefix."""
     inputs = prepare_inputs(model, processor, conversation, audio, prefill=True)
     logits = model(**inputs).logits[0, -1].float()
-    ids = letter_token_ids(processor.tokenizer)
+    ids = answer_token_ids(processor.tokenizer, words)
     probs = logits.softmax(-1)
-    pair = torch.stack([logits[ids["A"]], logits[ids["B"]]]).softmax(-1)
-    top_id = int(logits.argmax())
+    a, b = words
+    pair = torch.stack([logits[ids[a]], logits[ids[b]]]).softmax(-1)
+    return logits, ids, probs, pair
+
+
+def logit_readout(model, processor, conversation, audio):
+    logits, ids, probs, pair = _next_token_pair(model, processor, conversation, audio, ("A", "B"))
     return {
         "logit_A": float(logits[ids["A"]]),
         "logit_B": float(logits[ids["B"]]),
         "p_A": float(pair[0]),
         "p_B": float(pair[1]),
         "mass_ab": float(probs[ids["A"]] + probs[ids["B"]]),
-        "top_token": processor.tokenizer.decode([top_id]),
+        "top_token": processor.tokenizer.decode([int(logits.argmax())]),
+    }
+
+
+def yes_no_readout(model, processor, conversation, audio):
+    """P(Yes) for one Yes/No question; log_odds = logit(Yes) - logit(No)."""
+    logits, ids, probs, pair = _next_token_pair(model, processor, conversation, audio, ("Yes", "No"))
+    return {
+        "log_odds": float(logits[ids["Yes"]] - logits[ids["No"]]),
+        "p_yes": float(pair[0]),
+        "mass_yn": float(probs[ids["Yes"]] + probs[ids["No"]]),
+        "top_token": processor.tokenizer.decode([int(logits.argmax())]),
     }
 
 
