@@ -8,3 +8,6 @@ __pycache__/
 
 # machine-specific config written by the notebooks
 configs/local.yaml
+
+# Jupyter autosave folders
+.ipynb_checkpoints/
