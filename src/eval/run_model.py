@@ -5,7 +5,7 @@
     python -m src.eval.run_model --stimuli data/complexity/stimuli.jsonl --out results/complexity_run_1
 
 Predictions are appended one row at a time and already-finished stim_ids are skipped, so a
-Colab/Kaggle session that dies mid-run can simply be restarted with the same command.
+run (or Jupyter kernel) that dies mid-run can simply be restarted with the same command.
 --mock replaces the model with random answers to test the pipeline without a GPU.
 """
 

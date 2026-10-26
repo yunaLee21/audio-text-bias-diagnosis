@@ -168,8 +168,8 @@ Both readouts use the strict-JSON prompt from *Who Wins the Conflict?* [3], with
 │   ├── generated/              # stimuli.jsonl: one row per fact x condition (x A/B order)
 │   └── complexity/             # facts.json, audio/, stimuli.jsonl: the complexity dataset
 ├── notebooks/
-│   ├── kaggle_smoke_test.ipynb # GPU smoke test on Kaggle
-│   └── kaggle_pilot.ipynb      # full pilot + complexity run on Kaggle
+│   ├── smoke_test.ipynb        # GPU smoke test (local Jupyter)
+│   └── pilot.ipynb             # full pilot + complexity run (local Jupyter)
 ├── results/                    # one folder per run (created by run_model)
 ├── src/
 │   ├── common.py               # config + JSON/JSONL helpers
@@ -221,26 +221,24 @@ To test the pipeline without a GPU, `--mock` replaces the model with random answ
 python -m src.eval.run_model --mock --out results/mock
 ```
 
-### 2. Run on Kaggle (GPU)
+### 2. Run in Jupyter (GPU)
 
-1. Import `notebooks/kaggle_smoke_test.ipynb` into Kaggle (**File → Import Notebook**).
-2. In the notebook settings, choose **Accelerator: GPU T4 x2** and turn **Internet** on.
-3. For a private repository, add a read-only GitHub token as a Kaggle secret named `GITHUB_TOKEN`.
-4. Set `REPO_URL` in the notebook and **Run All**.
+1. On a machine with a CUDA GPU, install the requirements and start Jupyter from the repo: `jupyter lab`.
+2. Open `notebooks/smoke_test.ipynb` and **Run All**. The first run downloads the model (~15 GB) into the Hugging Face cache (`~/.cache/huggingface`, or `HF_HOME`).
 
 What the notebook does:
-- clones the repo
-- picks fp16 (≥ 20 GB total VRAM) or 4-bit (a single 16 GB GPU)
+- moves the kernel to the repo root
+- picks fp16 (≥ 20 GB total VRAM) or 4-bit (a single 16 GB GPU) and writes `configs/local.yaml` (git-ignored)
 - runs 2 fictitious + 2 control facts × 9 conditions (44 items)
 - reports whether both readouts are reliable (`mass_ab`, `greedy_agrees` and `mass_yn` all ≥ 0.9)
 
-After the smoke test passes, run `notebooks/kaggle_pilot.ipynb` the same way. It runs both datasets and their analyses:
+After the smoke test passes, run `notebooks/pilot.ipynb` the same way. It runs both datasets and their analyses:
 
 ```bash
-python -m src.eval.run_model --config configs/kaggle.yaml --out results/pilot_run_1
+python -m src.eval.run_model --config configs/local.yaml --out results/pilot_run_1
 python -m src.analysis.h1_h2_h3 --results results/pilot_run_1 --kind fictitious   # add --readout ab for A/B
 
-python -m src.eval.run_model --config configs/kaggle.yaml \
+python -m src.eval.run_model --config configs/local.yaml \
     --stimuli data/complexity/stimuli.jsonl --out results/complexity_run_1
 python -m src.analysis.complexity_sweep --results results/complexity_run_1        # add --readout ab for A/B
 ```

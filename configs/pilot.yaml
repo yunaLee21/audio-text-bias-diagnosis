@@ -5,8 +5,8 @@ seed: 42
 model:
   name: qwen2-audio-7b-instruct
   hf_id: Qwen/Qwen2-Audio-7B-Instruct
-  # 7B weights in fp16 are ~16 GB: Kaggle "GPU T4 x2" (2x15 GB) runs fp16 split across both GPUs;
-  # a single 16 GB GPU (P100, one T4) needs 4bit. T4/P100 have no bf16 -> use float16.
+  # 7B weights in fp16 are ~16 GB: >= 20 GB total VRAM runs fp16 (split across GPUs if needed);
+  # a single 16 GB GPU needs 4bit. GPUs older than Ampere have no native bf16 -> use float16.
   dtype: float16            # float16 | bfloat16 | float32
   quantization: none        # none | 4bit | 8bit  (4bit/8bit need bitsandbytes)
 
