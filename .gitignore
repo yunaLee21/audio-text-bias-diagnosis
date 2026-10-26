@@ -11,3 +11,6 @@ configs/local.yaml
 
 # Jupyter autosave folders
 .ipynb_checkpoints/
+
+# secrets (HF_TOKEN etc.)
+.env
